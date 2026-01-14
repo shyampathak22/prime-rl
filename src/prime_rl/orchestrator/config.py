@@ -321,6 +321,22 @@ class EnvConfig(BaseConfig):
         EnvLogConfig | None,
         Field(description="Logging config for this env's workers. If None, logging is disabled."),
     ] = None
+    reward_keys: Annotated[
+        list[str] | None,
+        Field(
+            description="List of metric keys to use as separate reward signals for per-reward "
+            "normalized advantage calculation. Example: ['correct_answer', 'length_reward']. "
+            "If None, uses the single aggregated reward."
+        ),
+    ] = None
+    reward_weights: Annotated[
+        list[float] | None,
+        Field(
+            description="Weights for each reward when summing normalized advantages. "
+            "Must match length of reward_keys. Example: [1.0, 0.5]. "
+            "If None, uses equal weights (1.0) for all rewards."
+        ),
+    ] = None
 
 
 class EvalEnvConfig(EnvConfig):
@@ -581,6 +597,16 @@ class BufferConfig(BaseConfig):
 
 class AdvantageConfig(BaseConfig):
     length_weighted_mean: bool = False
+
+    # Multi-reward support
+    batch_normalize: bool = True
+    """
+    Whether to apply batch-wise normalization after summing per-reward advantages.
+    Recommended for training stability when using multiple rewards.
+    """
+
+    std_eps: float = 1e-8
+    """Epsilon for numerical stability in standard deviation normalization."""
 
 
 class FileSystemWeightBroadcastConfig(BaseModel):
