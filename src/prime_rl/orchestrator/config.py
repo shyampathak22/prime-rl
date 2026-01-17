@@ -292,23 +292,9 @@ class RetryConfig(BaseConfig):
     reraise: Annotated[
         bool,
         Field(
-            description="Whether to reraise the exception after all retries are exhausted.",
+            description="Whether to reraise the original exception after all retries are exhausted. If False, raises tenacity.RetryError instead.",
         ),
-    ] = True
-
-
-class EnvLogConfig(BaseConfig):
-    """Configures logging for an environment worker."""
-
-    level: Annotated[
-        str,
-        Field(description="Log level for prime-rl logger in worker (debug, info, warn, error)."),
-    ] = "warn"
-
-    vf_level: Annotated[
-        str,
-        Field(description="Log level for verifiers logger in worker (debug, info, warn, error)."),
-    ] = "warn"
+    ] = False
 
 
 class EnvConfig(BaseConfig):
@@ -317,10 +303,6 @@ class EnvConfig(BaseConfig):
     id: Annotated[str, Field(description="ID of the environment to use.")] = "reverse-text"
     args: Annotated[dict, Field(description="Arguments to pass to the environment.")] = {}
     name: Annotated[str | None, Field(description="Name of the environment to use.")] = None
-    log: Annotated[
-        EnvLogConfig | None,
-        Field(description="Logging config for this env's workers. If None, logging is disabled."),
-    ] = None
     reward_keys: Annotated[
         list[str] | None,
         Field(

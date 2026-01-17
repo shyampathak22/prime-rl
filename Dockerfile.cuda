@@ -40,6 +40,7 @@ COPY README.md /app/README.md
 COPY src/ /app/src/
 COPY configs /app/configs
 COPY examples /app/examples
+COPY benchmarks/scripts /app/benchmarks/scripts
 
 RUN --mount=type=cache,target=/app/.cache/uv \
     uv sync --all-extras --locked --no-dev
@@ -62,6 +63,8 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     curl \
     vim \
+    libibverbs1 \
+    ibverbs-providers \
     && apt-get clean autoclean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 

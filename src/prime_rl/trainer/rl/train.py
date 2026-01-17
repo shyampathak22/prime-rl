@@ -42,6 +42,7 @@ from prime_rl.trainer.perf import get_perf_counter
 from prime_rl.trainer.utils import (
     MemoryProfiler,
     Tensors,
+    export_benchmark_json,
     get_ckpt_disk_metrics,
     setup_torch_distributed,
     print_benchmark,
@@ -51,11 +52,12 @@ from prime_rl.trainer.world import get_world
 from prime_rl.trainer.runs import setup_runs, Progress, get_runs
 from prime_rl.trainer.models.layers.lora import set_lora_num_tokens
 from prime_rl.utils.heartbeat import Heartbeat
-from prime_rl.utils.metrics_server import MetricsServer, RunStats
+from prime_rl.utils.metrics_server import HealthServer, MetricsServer, RunStats
 from prime_rl.utils.monitor import setup_monitor
 from prime_rl.utils.pydantic_config import parse_argv
 from prime_rl.utils.utils import clean_exit, resolve_latest_ckpt_step, to_col_format
 from ring_flash_attn import substitute_hf_flash_attn
+from torchtitan.distributed.utils import clip_grad_norm_
 
 
 @clean_exit
@@ -72,7 +74,7 @@ def train(config: RLTrainerConfig):
     logger.info(f"Starting RL trainer in {world} in {config.output_dir}")
 
     # Print warning if running in benchmark mode
-    if config.bench:
+    if config.bench is not None:
         logger.warning(f"Running in benchmark mode (max_steps={config.max_steps})")
 
     # Setup the monitor
@@ -85,12 +87,18 @@ def train(config: RLTrainerConfig):
         logger.info("Initializing heartbeat")
         heart = Heartbeat(config.heartbeat.url)
 
-    # Setup metrics server (only on rank 0)
+    # Setup metrics server (full on master, health-only on other nodes' local rank 0)
     metrics_server = None
-    if config.metrics_server is not None and world.is_master:
-        logger.info(f"Initializing metrics server on port {config.metrics_server.port}")
-        metrics_server = MetricsServer(config.metrics_server)
-        metrics_server.start()
+    health_server = None
+    if config.metrics_server is not None and world.local_rank == 0:
+        if world.is_master:
+            logger.info(f"Initializing metrics server on port {config.metrics_server.port}")
+            metrics_server = MetricsServer(config.metrics_server)
+            metrics_server.start()
+        else:
+            logger.info(f"Initializing health server on port {config.metrics_server.port}")
+            health_server = HealthServer(config.metrics_server.port, config.metrics_server.host)
+            health_server.start()
 
     # Set precision
     setup_torch_distributed(
@@ -154,12 +162,12 @@ def train(config: RLTrainerConfig):
         optimizer = setup_optimizer(
             config.optim,
             list(model.named_parameters()),
-            parallel_dims.world_mesh["dp_shard_cp"],
+            parallel_dims,
             lora=config.model.lora is not None,
         )
         scheduler = setup_scheduler(optimizer, config.scheduler, config.max_steps, config.optim.lr)
     else:
-        optimizer = setup_multi_optimizer(config.optim, parallel_dims.world_mesh["dp_shard_cp"])
+        optimizer = setup_multi_optimizer(config.optim, parallel_dims)
         scheduler = setup_multi_scheduler(optimizer, config.scheduler, config.max_steps)
 
     logger.info(f"Using `{config.scheduler.type}` scheduler ({config.scheduler})")
@@ -348,8 +356,12 @@ def train(config: RLTrainerConfig):
 
             vocab_size = model.config.vocab_size
             # This is not really necessary as the first token should be masked out, but we do it anyway to be sure
-            out["logprobs"] = shift_tensor_right(out["logprobs"], pad_value=torch.log(torch.tensor(1.0 / vocab_size)).item())
-            out["entropy"] = shift_tensor_right(out["entropy"], pad_value=torch.log(torch.tensor(float(vocab_size))).item())
+            out["logprobs"] = shift_tensor_right(
+                out["logprobs"], pad_value=torch.log(torch.tensor(1.0 / vocab_size)).item()
+            )
+            out["entropy"] = shift_tensor_right(
+                out["entropy"], pad_value=torch.log(torch.tensor(float(vocab_size))).item()
+            )
 
             # Compute loss
             response_lengths = get_response_lengths(position_ids)
@@ -393,11 +405,12 @@ def train(config: RLTrainerConfig):
             logger.debug(micro_step_message)
 
         # Optionally, clip the gradients
-        grad_norm_dtensor = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optim.max_norm)
-        # Convert to CUDA if on CPU (needed for FSDP CPU offloading)
-        if grad_norm_dtensor.device.type == "cpu":
-            grad_norm_dtensor = grad_norm_dtensor.to(torch.device("cuda"))
-        grad_norm = grad_norm_dtensor.full_tensor()
+
+        grad_norm = clip_grad_norm_(
+            model.parameters(), max_norm=config.optim.max_norm, ep_enabled=parallel_dims.ep_enabled
+        )
+        if grad_norm.device.type == "cpu":
+            grad_norm = grad_norm.to(torch.device("cuda"))
 
         # Update the model parameters
         optimizer.step()
@@ -545,13 +558,19 @@ def train(config: RLTrainerConfig):
     logger.info(f"Peak memory: {max(to_col_format(monitor.history)['perf/peak_memory']):.1f} GiB")
     logger.success("RL trainer finished!")
 
-    # Stop metrics server if configured
+    # Stop metrics/health server if configured
     if metrics_server is not None:
         metrics_server.stop()
+    if health_server is not None:
+        health_server.stop()
 
-    # Optionally, print benchmark table
-    if config.bench and world.is_master:
-        print_benchmark(to_col_format(monitor.history))
+    # Optionally, print benchmark table and export JSON
+    if config.bench is not None and world.is_master:
+        history = to_col_format(monitor.history)
+        print_benchmark(history)
+        if config.bench.output_json:
+            export_benchmark_json(history, config.bench.output_json)
+            logger.info(f"Benchmark results written to {config.bench.output_json}")
 
 
 def main():
