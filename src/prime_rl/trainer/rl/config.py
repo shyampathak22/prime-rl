@@ -54,6 +54,10 @@ class LossConfig(BaseConfig):
     adv_tau: Annotated[float, Field(ge=0, description="The tau for advantages.")] = 1.0
     teacher_tau: Annotated[float, Field(ge=0, description="The tau for teacher logprobs.")] = 0.0
     kl_tau: Annotated[float, Field(ge=0, description="The tau for KL divergence.")] = 0.0
+    entropy_adv_scale: Annotated[
+        float,
+        Field(ge=0, description="Scale for KL-weighted advantage amplification. 0.0 disables."),
+    ] = 0.0
 
     @model_validator(mode="after")
     def validate_mask_bounds(self):

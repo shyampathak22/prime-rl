@@ -146,6 +146,10 @@ def compute_loss(
 
         importance_ratio = seq_importance_ratio if loss_config.ratio_type == "sequence" else token_importance_ratio
 
+        if loss_config.entropy_adv_scale > 0.0:
+            mean_kl = _safe_mean(token_mismatch_kl, loss_mask).detach()
+            advantages = advantages + loss_config.entropy_adv_scale * advantages * mean_kl
+
         advantages = loss_config.adv_tau * advantages
         if teacher_logprobs is not None:
             advantages = advantages + loss_config.teacher_tau * teacher_kl.detach()

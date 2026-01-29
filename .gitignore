@@ -200,4 +200,8 @@ outputs/
 local/
 # Local experiment configs
 configs/gsm8k-*/
+!configs/gsm8k-gdpo/
+!configs/gsm8k-gdpo-gated/
+!configs/gsm8k-grpo-gated/
+!configs/gsm8k-gdpo-entropy-adv/
 configs/deepscaler-multireward/
