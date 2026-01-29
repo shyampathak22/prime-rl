@@ -6,7 +6,7 @@
 inference_gpu_ids = [0,1,2,3,4,5]
 trainer_gpu_ids = [6,7]
 
-max_steps = 1000
+max_steps = 500
 seq_len = 8192
 
 [model]
@@ -17,11 +17,11 @@ project = "adpo-ablations"
 name = "gdpo-gated"
 
 [ckpt]
-interval = 100
+interval = 50
 
 [orchestrator]
-batch_size = 1024
-rollouts_per_example = 8
+batch_size = 512
+rollouts_per_example = 16
 
 [orchestrator.sampling]
 temperature = 0.6
